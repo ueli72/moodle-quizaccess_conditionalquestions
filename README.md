@@ -35,6 +35,21 @@ restrictions" section, link "Configure conditional questions").
 Random questions cannot have a condition, because the concrete question is
 only chosen when the attempt starts.
 
+## Backup and restore
+
+Rules are attached to the quiz module backup and restored together with the
+quiz. Question, group, course module and badge ids are remapped on restore.
+Rules whose target cannot be resolved (e.g. a competency on a different site)
+are dropped, because a dangling condition would hide the question from
+everybody. Rules and attempt data are deleted automatically when the quiz
+module is deleted.
+
+## License
+
+The plugin is distributed under the GNU General Public License as published
+by the Free Software Foundation, version 3 or later (see the LICENSE file).
+
+
 ## Data migration
 
 The predecessor plugin `local_conditional_questions` relied on a core patch

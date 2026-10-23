@@ -240,6 +240,29 @@ final class hook_callbacks {
     }
 
     /**
+     * Clean up the rules and attempt data of a deleted quiz.
+     *
+     * @param \core\event\course_module_deleted $event the event.
+     */
+    public static function quiz_module_deleted(\core\event\course_module_deleted $event): void {
+        global $DB;
+
+        if (!isset($event->other['modulename']) || $event->other['modulename'] !== 'quiz') {
+            return;
+        }
+        $quizid = (int) ($event->other['instanceid'] ?? 0);
+        if ($quizid <= 0) {
+            return;
+        }
+
+        $DB->delete_records_select('quizaccess_condq_hidden',
+            "attemptid IN (SELECT attemptid FROM {quizaccess_condq_attempt} WHERE quizid = :quizid)",
+            ['quizid' => $quizid]);
+        $DB->delete_records('quizaccess_condq_attempt', ['quizid' => $quizid]);
+        $DB->delete_records('quizaccess_condq_rule', ['quizid' => $quizid]);
+    }
+
+    /**
      * Check whether a rule's condition is met for the user.
      *
      * @param \stdClass $rule the rule record from quizaccess_condq_rule.

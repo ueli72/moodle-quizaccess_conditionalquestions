@@ -97,23 +97,6 @@ $form = new \quizaccess_conditionalquestions\form\conditions(null, [
     'targets' => $targets,
     'cmid' => $cmid,
 ]);
-$PAGE->requires->js_init_code(<<<'JS'
-document.querySelectorAll('select[name^="condition_"]').forEach((condition) => {
-    const questionid = condition.dataset.questionId;
-    const targets = ['group', 'activity', 'competency', 'badge'].map((type) => {
-        const element = document.querySelector('[name="target_' + type + '_' + questionid + '"]');
-        return {type, element, wrapper: element ? element.closest('.fitem, .form-group') : null};
-    });
-    const update = () => targets.forEach((target) => {
-        if (target.wrapper) {
-            target.wrapper.hidden = target.type !== condition.value;
-        }
-    });
-    condition.addEventListener('change', update);
-    update();
-});
-JS
-);
 
 // Pre-fill the form with the existing rules, keyed per question id.
 $formdata = ['cmid' => $cmid];
@@ -134,6 +117,8 @@ foreach ($questions as $question) {
     }
 }
 $form->set_data((object) $formdata);
+
+$PAGE->requires->js_call_amd('quizaccess_conditionalquestions/conditions', 'init');
 
 if ($form->is_cancelled()) {
     redirect(new \moodle_url('/mod/quiz/edit.php', ['cmid' => $cmid]));

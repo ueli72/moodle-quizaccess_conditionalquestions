@@ -25,7 +25,7 @@
 defined('MOODLE_INTERNAL') || die();
 
 $plugin->component = 'quizaccess_conditionalquestions';
-$plugin->version = 2026100300;
+$plugin->version = 2026100301;
 $plugin->requires = 2026041000;
 $plugin->supported = [502, 502];
 $plugin->maturity = MATURITY_ALPHA;
