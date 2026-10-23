@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<XMLDB PATH="mod/quiz/accessrule/conditionalquestions/db" VERSION="20261003" COMMENT="Conditional quiz questions"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:noNamespaceSchemaLocation="../../../../../lib/xmldb/xmldb.xsd">
+  <TABLES>
+    <TABLE NAME="quizaccess_condq_rule" COMMENT="One visibility condition for a quiz question">
+      <FIELDS>
+        <FIELD NAME="id" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="true"/>
+        <FIELD NAME="quizid" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0"/>
+        <FIELD NAME="questionid" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0"/>
+        <FIELD NAME="conditiontype" TYPE="char" LENGTH="20" NOTNULL="true"/>
+        <FIELD NAME="conditionvalue" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0"/>
+        <FIELD NAME="timecreated" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0"/>
+        <FIELD NAME="timemodified" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0"/>
+      </FIELDS>
+      <KEYS>
+        <KEY NAME="primary" TYPE="primary" FIELDS="id"/>
+      </KEYS>
+      <INDEXES>
+        <INDEX NAME="quiz-question" UNIQUE="true" FIELDS="quizid, questionid"/>
+        <INDEX NAME="quiz" UNIQUE="false" FIELDS="quizid"/>
+      </INDEXES>
+    </TABLE>
+    <TABLE NAME="quizaccess_condq_attempt" COMMENT="Per attempt maximum mark used to normalise the attempt grade">
+      <FIELDS>
+        <FIELD NAME="id" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="true"/>
+        <FIELD NAME="attemptid" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0"/>
+        <FIELD NAME="quizid" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0"/>
+        <FIELD NAME="userid" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0"/>
+        <FIELD NAME="maxmark" TYPE="number" LENGTH="12" DECIMALS="7" NOTNULL="true" DEFAULT="0"/>
+        <FIELD NAME="rawsumgrades" TYPE="number" LENGTH="12" DECIMALS="7" NOTNULL="false"/>
+        <FIELD NAME="scaledsumgrades" TYPE="number" LENGTH="12" DECIMALS="7" NOTNULL="false"/>
+        <FIELD NAME="timecreated" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0"/>
+        <FIELD NAME="timemodified" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0"/>
+      </FIELDS>
+      <KEYS>
+        <KEY NAME="primary" TYPE="primary" FIELDS="id"/>
+      </KEYS>
+      <INDEXES>
+        <INDEX NAME="attempt" UNIQUE="true" FIELDS="attemptid"/>
+        <INDEX NAME="quiz-user" UNIQUE="false" FIELDS="quizid, userid"/>
+      </INDEXES>
+    </TABLE>
+    <TABLE NAME="quizaccess_condq_hidden" COMMENT="Slots where a question was replaced by the placeholder in an attempt">
+      <FIELDS>
+        <FIELD NAME="id" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="true"/>
+        <FIELD NAME="attemptid" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0"/>
+        <FIELD NAME="slot" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0"/>
+        <FIELD NAME="questionid" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0"/>
+        <FIELD NAME="maxmark" TYPE="number" LENGTH="12" DECIMALS="7" NOTNULL="true" DEFAULT="0"/>
+      </FIELDS>
+      <KEYS>
+        <KEY NAME="primary" TYPE="primary" FIELDS="id"/>
+      </KEYS>
+      <INDEXES>
+        <INDEX NAME="attempt-slot" UNIQUE="true" FIELDS="attemptid, slot"/>
+      </INDEXES>
+    </TABLE>
+  </TABLES>
+</XMLDB>
