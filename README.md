@@ -56,18 +56,32 @@ The predecessor plugin `local_conditional_questions` relied on a core patch
 that is no longer needed and should be reverted. On installation this plugin
 migrates automatically:
 
-- rules from `local_conditional_questions_rule` are copied;
+- rules from `local_conditional_questions_rule` (or `local_cq_rule` from the
+  very first release) are copied;
 - per-attempt maxima stored in the `quiz_attempts.maxmark` column added by the
   old core patch are moved into the plugin's own table, the stored attempt
   sumgrades are normalised, and the core column is dropped again.
 
-After installing this plugin, uninstall `local_conditional_questions` and
-revert its core patch:
+Recommended migration order for a site that runs the old plugin:
+
+1. Take a full backup (database, code, moodledata).
+2. Copy this plugin to `mod/quiz/accessrule/conditionalquestions/`.
+3. Revert the old core patch and reset the `mod_quiz` version in the database:
+   `UPDATE {config_plugins} SET value = '2026042000' WHERE plugin = 'mod_quiz' AND name = 'version';`
+4. Run the upgrade (web or `php admin/cli/upgrade.php`) - this installs this
+   plugin and migrates the data.
+5. Uninstall the old plugin:
+   `php admin/cli/uninstall_plugins.php --plugins=local_conditional_questions --run`
+   and delete the `local/conditional_questions/` directory.
+
+After installing this plugin, revert its core patch:
 
 ```text
 git -C /path/to/moodle apply -R public/local/conditional_questions/cli/core_patch.patch
-php admin/cli/uninstall_plugins.php --plugin=local_conditional_questions
 ```
+
+If the site is not a git checkout, restore the original `mod/quiz` files from
+the official Moodle 5.2.x package instead.
 
 ## Tests
 

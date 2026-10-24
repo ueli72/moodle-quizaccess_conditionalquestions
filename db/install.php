@@ -37,9 +37,15 @@ function xmldb_quizaccess_conditionalquestions_install(): void {
     $dbman = $DB->get_manager();
     $now = time();
 
-    // 1. Migrate the visibility rules.
+    // 1. Migrate the visibility rules (the very first release used a shorter table name).
+    $oldtable = null;
     if ($dbman->table_exists('local_conditional_questions_rule')) {
-        $oldrules = $DB->get_records('local_conditional_questions_rule');
+        $oldtable = 'local_conditional_questions_rule';
+    } else if ($dbman->table_exists('local_cq_rule')) {
+        $oldtable = 'local_cq_rule';
+    }
+    if ($oldtable) {
+        $oldrules = $DB->get_records($oldtable);
         foreach ($oldrules as $old) {
             if ($DB->record_exists('quizaccess_condq_rule', [
                 'quizid' => $old->quizid,
