@@ -74,10 +74,32 @@ Recommended migration order for a site that runs the old plugin:
    `php admin/cli/uninstall_plugins.php --plugins=local_conditional_questions --run`
    and delete the `local/conditional_questions/` directory.
 
-After installing this plugin, revert its core patch:
+## Automated installation
+
+`install.sh` in the plugin repository performs the complete migration
+automatically: it detects the Moodle webroot (standard or `public/` layout),
+backs up the database and the patched `mod/quiz` code, copies the plugin,
+reverts the old core patch (`docs/core_patch.patch`), resets the `mod_quiz`
+version, runs the upgrade and uninstalls the old plugin. It is safe to re-run
+and also works on sites without the old plugin (then it only installs this
+one).
 
 ```text
-git -C /path/to/moodle apply -R public/local/conditional_questions/cli/core_patch.patch
+git clone https://github.com/ueli72/moodle-quizaccess_conditionalquestions.git /tmp/cq
+bash /tmp/cq/install.sh --webroot /path/to/dirroot --dry-run   # preview
+bash /tmp/cq/install.sh --webroot /path/to/dirroot             # migrate
+```
+
+Options: `--yes` (no confirmation), `--skip-backup`, `--no-uninstall-old`,
+`--dry-run`. A step-by-step guide for running the migration remotely
+(including a manual fallback that restores the patched files from the official
+Moodle package) is in `docs/AGENT_COREPATCH_REMOVAL.md`.
+
+After installing this plugin, revert the old core patch (done automatically by
+`install.sh`):
+
+```text
+git -C /path/to/moodle apply -R /tmp/cq/docs/core_patch.patch
 ```
 
 If the site is not a git checkout, restore the original `mod/quiz` files from

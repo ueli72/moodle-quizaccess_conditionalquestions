@@ -1,0 +1,798 @@
+diff --git a/public/mod/quiz/backup/moodle2/backup_quiz_stepslib.php b/public/mod/quiz/backup/moodle2/backup_quiz_stepslib.php
+index 4869678e400..8b78fe2cb70 100644
+--- a/public/mod/quiz/backup/moodle2/backup_quiz_stepslib.php
++++ b/public/mod/quiz/backup/moodle2/backup_quiz_stepslib.php
+@@ -84,7 +84,7 @@ class backup_quiz_activity_structure_step extends backup_questions_activity_stru
+         $attempt = new backup_nested_element('attempt', ['id'], [
+             'userid', 'attemptnum', 'uniqueid', 'layout', 'currentpage', 'preview',
+             'state', 'timestart', 'timefinish', 'timemodified', 'timemodifiedoffline',
+-            'timecheckstate', 'sumgrades', 'gradednotificationsenttime']);
++            'timecheckstate', 'sumgrades', 'maxmark', 'gradednotificationsenttime']);
+ 
+         // This module is using questions, so produce the related question states and sessions
+         // attaching them to the $attempt element based in 'uniqueid' matching.
+diff --git a/public/mod/quiz/classes/external.php b/public/mod/quiz/classes/external.php
+index 1c597e27249..f5a6fe22b53 100644
+--- a/public/mod/quiz/classes/external.php
++++ b/public/mod/quiz/classes/external.php
+@@ -666,7 +666,7 @@ class mod_quiz_external extends external_api {
+             }
+ 
+             if ($canviewfeedback) {
+-                $attemptgrade = quiz_rescale_grade($attemptsumgrades, $quiz, false);
++                $attemptgrade = quiz_rescale_grade($attemptsumgrades, $quiz, false, $attempt);
+                 $feedbackrecord = quiz_feedback_record_for_grade($attemptgrade, $quiz);
+                 [$text, $format] = \core_external\util::format_text(
+                     $feedbackrecord->feedbacktext,
+@@ -1749,7 +1749,8 @@ class mod_quiz_external extends external_api {
+         }
+ 
+         // Feedback if there is any, and the user is allowed to see it now.
+-        $grade = quiz_rescale_grade($attemptobj->get_attempt()->sumgrades, $attemptobj->get_quiz(), false);
++        $grade = quiz_rescale_grade($attemptobj->get_attempt()->sumgrades, $attemptobj->get_quiz(), false,
++            $attemptobj->get_attempt());
+ 
+         $feedback = $attemptobj->get_overall_feedback($grade);
+         if ($displayoptions->overallfeedback && $feedback) {
+diff --git a/public/mod/quiz/classes/grade_calculator.php b/public/mod/quiz/classes/grade_calculator.php
+index 155c2186be5..03feba9bcca 100644
+--- a/public/mod/quiz/classes/grade_calculator.php
++++ b/public/mod/quiz/classes/grade_calculator.php
+@@ -167,6 +167,10 @@ class grade_calculator {
+             $attempts = quiz_get_user_attempts($quiz->id, $userid);
+         }
+ 
++        $gradehook = new \mod_quiz\hook\before_final_grade_calculated($this->quizobj, $userid, $attempts);
++        \core\di::get(\core\hook\manager::class)->dispatch($gradehook);
++        $attempts = $gradehook->get_attempts();
++
+         // Calculate the best grade.
+         $bestgrade = $this->compute_final_grade_from_attempts($attempts);
+         $bestgrade = quiz_rescale_grade($bestgrade, $quiz, false);
+@@ -387,6 +391,10 @@ class grade_calculator {
+             $DB->delete_records_select('quiz_grades', 'quiz = ? AND userid ' . $test,
+                     array_merge([$quiz->id], $params));
+         }
++
++        \core\di::get(\core\hook\manager::class)->dispatch(
++            new \mod_quiz\hook\after_all_final_grades_recomputed($this->quizobj)
++        );
+     }
+ 
+     /**
+diff --git a/public/mod/quiz/classes/hook/after_all_final_grades_recomputed.php b/public/mod/quiz/classes/hook/after_all_final_grades_recomputed.php
+new file mode 100644
+index 00000000000..b0a8d9fa398
+--- /dev/null
++++ b/public/mod/quiz/classes/hook/after_all_final_grades_recomputed.php
+@@ -0,0 +1,26 @@
++<?php
++// This file is part of Moodle - http://moodle.org/
++
++namespace mod_quiz\hook;
++
++use core\hook\described_hook;
++
++/** Notifies plugins that the quiz bulk final-grade calculation has completed. */
++#[\core\attribute\label('Notifies plugins after all quiz final grades are recomputed')]
++#[\core\attribute\tags('quiz', 'grade')]
++final class after_all_final_grades_recomputed implements described_hook {
++    public function __construct(private readonly \mod_quiz\quiz_settings $quiz) {
++    }
++
++    public static function get_hook_description(): string {
++        return 'Notifies plugins after all final grades for a quiz are recomputed.';
++    }
++
++    public static function get_hook_tags(): array {
++        return ['quiz', 'grade'];
++    }
++
++    public function get_quiz(): \mod_quiz\quiz_settings {
++        return $this->quiz;
++    }
++}
+diff --git a/public/mod/quiz/classes/hook/before_attempt_grade_rescaled.php b/public/mod/quiz/classes/hook/before_attempt_grade_rescaled.php
+new file mode 100644
+index 00000000000..c17863ceeed
+--- /dev/null
++++ b/public/mod/quiz/classes/hook/before_attempt_grade_rescaled.php
+@@ -0,0 +1,53 @@
++<?php
++// This file is part of Moodle - http://moodle.org/
++
++namespace mod_quiz\hook;
++
++use core\hook\described_hook;
++
++/** Allows plugins to provide a per-attempt denominator when a quiz grade is rescaled. */
++#[\core\attribute\label('Allows plugins to adjust quiz attempt grade rescaling')]
++#[\core\attribute\tags('quiz', 'grade')]
++final class before_attempt_grade_rescaled implements described_hook {
++    private ?float $maxmark = null;
++
++    public function __construct(
++        private readonly float $rawgrade,
++        private readonly \stdClass $quiz,
++        private readonly bool|string $format,
++        private readonly ?\stdClass $attempt = null,
++    ) {
++    }
++
++    public static function get_hook_description(): string {
++        return 'Allows plugins to adjust the denominator used to rescale a quiz attempt grade.';
++    }
++
++    public static function get_hook_tags(): array {
++        return ['quiz', 'grade'];
++    }
++
++    public function get_raw_grade(): float {
++        return $this->rawgrade;
++    }
++
++    public function get_quiz(): \stdClass {
++        return $this->quiz;
++    }
++
++    public function get_format(): bool|string {
++        return $this->format;
++    }
++
++    public function get_attempt(): ?\stdClass {
++        return $this->attempt;
++    }
++
++    public function set_maxmark(?float $maxmark): void {
++        $this->maxmark = $maxmark;
++    }
++
++    public function get_maxmark(): ?float {
++        return $this->maxmark;
++    }
++}
+diff --git a/public/mod/quiz/classes/hook/before_attempt_questions_created.php b/public/mod/quiz/classes/hook/before_attempt_questions_created.php
+new file mode 100644
+index 00000000000..65a9b9059c7
+--- /dev/null
++++ b/public/mod/quiz/classes/hook/before_attempt_questions_created.php
+@@ -0,0 +1,61 @@
++<?php
++// This file is part of Moodle - http://moodle.org/
++
++namespace mod_quiz\hook;
++
++use core\hook\described_hook;
++
++/**
++ * Allows plugins to remove questions before a quiz attempt is created.
++ *
++ * @package    mod_quiz
++ * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
++ */
++#[\core\attribute\label('Allows plugins to filter questions when a quiz attempt is created')]
++#[\core\attribute\tags('quiz')]
++final class before_attempt_questions_created implements described_hook {
++    /** @var array<int, \stdClass> */
++    private array $questions;
++
++    public function __construct(
++        /** @var \mod_quiz\quiz_settings */
++        private readonly \mod_quiz\quiz_settings $quiz,
++        /** @var int */
++        private readonly int $userid,
++        array $questions,
++    ) {
++        $this->questions = $questions;
++    }
++
++    public static function get_hook_description(): string {
++        return 'Allows plugins to filter quiz questions before an attempt is created.';
++    }
++
++    public static function get_hook_tags(): array {
++        return ['quiz'];
++    }
++
++    public function get_quiz(): \mod_quiz\quiz_settings {
++        return $this->quiz;
++    }
++
++    public function get_userid(): int {
++        return $this->userid;
++    }
++
++    /**
++     * Remove a question by its question-bank id.
++     *
++     * @param int $questionid question-bank id
++     */
++    public function remove_question(int $questionid): void {
++        unset($this->questions[$questionid]);
++    }
++
++    /**
++     * @return array<int, \stdClass>
++     */
++    public function get_questions(): array {
++        return $this->questions;
++    }
++}
+diff --git a/public/mod/quiz/classes/hook/before_attempt_saved.php b/public/mod/quiz/classes/hook/before_attempt_saved.php
+new file mode 100644
+index 00000000000..398367193ce
+--- /dev/null
++++ b/public/mod/quiz/classes/hook/before_attempt_saved.php
+@@ -0,0 +1,38 @@
++<?php
++// This file is part of Moodle - http://moodle.org/
++
++namespace mod_quiz\hook;
++
++use core\hook\described_hook;
++
++/** Allows plugins to add generic per-attempt data before a quiz attempt is saved. */
++#[\core\attribute\label('Allows plugins to extend quiz attempt data before it is saved')]
++#[\core\attribute\tags('quiz', 'attempt')]
++final class before_attempt_saved implements described_hook {
++    public function __construct(
++        private readonly \mod_quiz\quiz_settings $quiz,
++        private readonly \question_usage_by_activity $quba,
++        private readonly \stdClass $attempt,
++    ) {
++    }
++
++    public static function get_hook_description(): string {
++        return 'Allows plugins to extend generic quiz attempt data before it is saved.';
++    }
++
++    public static function get_hook_tags(): array {
++        return ['quiz', 'attempt'];
++    }
++
++    public function get_quiz(): \mod_quiz\quiz_settings {
++        return $this->quiz;
++    }
++
++    public function get_question_usage(): \question_usage_by_activity {
++        return $this->quba;
++    }
++
++    public function get_attempt(): \stdClass {
++        return $this->attempt;
++    }
++}
+diff --git a/public/mod/quiz/classes/hook/before_final_grade_calculated.php b/public/mod/quiz/classes/hook/before_final_grade_calculated.php
+new file mode 100644
+index 00000000000..eb8d0330225
+--- /dev/null
++++ b/public/mod/quiz/classes/hook/before_final_grade_calculated.php
+@@ -0,0 +1,42 @@
++<?php
++// This file is part of Moodle - http://moodle.org/
++
++namespace mod_quiz\hook;
++
++use core\hook\described_hook;
++
++/** Allows plugins to adjust attempt grades before a quiz final grade is selected. */
++#[\core\attribute\label('Allows plugins to adjust quiz attempts before final grade calculation')]
++#[\core\attribute\tags('quiz', 'grade')]
++final class before_final_grade_calculated implements described_hook {
++    public function __construct(
++        private readonly \mod_quiz\quiz_settings $quiz,
++        private readonly int $userid,
++        private array $attempts,
++    ) {
++    }
++
++    public static function get_hook_description(): string {
++        return 'Allows plugins to adjust quiz attempt grades before the final grade is calculated.';
++    }
++
++    public static function get_hook_tags(): array {
++        return ['quiz', 'grade'];
++    }
++
++    public function get_quiz(): \mod_quiz\quiz_settings {
++        return $this->quiz;
++    }
++
++    public function get_userid(): int {
++        return $this->userid;
++    }
++
++    public function get_attempts(): array {
++        return $this->attempts;
++    }
++
++    public function set_attempts(array $attempts): void {
++        $this->attempts = $attempts;
++    }
++}
+diff --git a/public/mod/quiz/classes/hook/edit_menu_actions.php b/public/mod/quiz/classes/hook/edit_menu_actions.php
+new file mode 100644
+index 00000000000..345a46c560d
+--- /dev/null
++++ b/public/mod/quiz/classes/hook/edit_menu_actions.php
+@@ -0,0 +1,86 @@
++<?php
++// This file is part of Moodle - http://moodle.org/
++
++namespace mod_quiz\hook;
++
++use core\hook\described_hook;
++
++/**
++ * Allows plugins to extend the quiz question add menu.
++ *
++ * @package    mod_quiz
++ * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
++ */
++#[\core\attribute\label('Allows plugins to extend the quiz question add menu')]
++#[\core\attribute\tags('quiz')]
++final class edit_menu_actions implements described_hook {
++    /** @var array<string, \action_menu_link> */
++    private array $actions;
++
++    public function __construct(
++        /** @var \mod_quiz\structure */
++        private readonly \mod_quiz\structure $structure,
++        /** @var int */
++        private readonly int $page,
++        /** @var \moodle_url */
++        private readonly \moodle_url $pageurl,
++        /** @var array */
++        private readonly array $pagevars,
++        array $actions,
++    ) {
++        $this->actions = $actions;
++    }
++
++    public static function get_hook_description(): string {
++        return 'Allows plugins to extend the quiz question add menu.';
++    }
++
++    public static function get_hook_tags(): array {
++        return ['quiz'];
++    }
++
++    public function get_structure(): \mod_quiz\structure {
++        return $this->structure;
++    }
++
++    public function get_page(): int {
++        return $this->page;
++    }
++
++    public function get_page_url(): \moodle_url {
++        return $this->pageurl;
++    }
++
++    public function get_pagevars(): array {
++        return $this->pagevars;
++    }
++
++    /**
++     * Add or replace an action. Passing null removes an existing action.
++     *
++     * @param string $identifier plugin-prefixed unique identifier
++     * @param \action_menu_link|null $action action to add
++     */
++    public function add_action(string $identifier, ?\action_menu_link $action): void {
++        if ($action === null) {
++            unset($this->actions[$identifier]);
++            return;
++        }
++        $lastkey = array_key_last($this->actions);
++        $lastaction = $lastkey === null ? null : $this->actions[$lastkey];
++        if ($lastkey !== null) {
++            unset($this->actions[$lastkey]);
++        }
++        $this->actions[$identifier] = $action;
++        if ($lastkey !== null) {
++            $this->actions[$lastkey] = $lastaction;
++        }
++    }
++
++    /**
++     * @return array<string, \action_menu_link>
++     */
++    public function get_actions(): array {
++        return $this->actions;
++    }
++}
+diff --git a/public/mod/quiz/classes/hook/edit_question_actions.php b/public/mod/quiz/classes/hook/edit_question_actions.php
+new file mode 100644
+index 00000000000..47cd26461eb
+--- /dev/null
++++ b/public/mod/quiz/classes/hook/edit_question_actions.php
+@@ -0,0 +1,55 @@
++<?php
++// This file is part of Moodle - http://moodle.org/
++
++namespace mod_quiz\hook;
++
++use core\hook\described_hook;
++
++/**
++ * Allows plugins to extend the actions shown for a quiz question slot.
++ *
++ * @package    mod_quiz
++ * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
++ */
++#[\core\attribute\label('Allows plugins to extend quiz question actions')]
++#[\core\attribute\tags('quiz')]
++final class edit_question_actions implements described_hook {
++    /** @var string[] */
++    private array $actions = [];
++
++    public function __construct(
++        private readonly \mod_quiz\structure $structure,
++        private readonly int $slot,
++        private readonly \moodle_url $pageurl,
++    ) {
++    }
++
++    public static function get_hook_description(): string {
++        return 'Allows plugins to extend the actions shown for a quiz question slot.';
++    }
++
++    public static function get_hook_tags(): array {
++        return ['quiz'];
++    }
++
++    public function get_structure(): \mod_quiz\structure {
++        return $this->structure;
++    }
++
++    public function get_slot(): int {
++        return $this->slot;
++    }
++
++    public function get_page_url(): \moodle_url {
++        return $this->pageurl;
++    }
++
++    public function add_action(string $identifier, string $action): void {
++        $this->actions[$identifier] = $action;
++    }
++
++    /** @return string[] */
++    public function get_actions(): array {
++        return $this->actions;
++    }
++}
+diff --git a/public/mod/quiz/classes/local/reports/attempts_report_table.php b/public/mod/quiz/classes/local/reports/attempts_report_table.php
+index d3ad48d8d03..0fff470c63d 100644
+--- a/public/mod/quiz/classes/local/reports/attempts_report_table.php
++++ b/public/mod/quiz/classes/local/reports/attempts_report_table.php
+@@ -276,7 +276,7 @@ abstract class attempts_report_table extends \table_sql {
+         }
+ 
+         $feedback = quiz_report_feedback_for_grade(
+-                quiz_rescale_grade($attempt->sumgrades, $this->quiz, false),
++                quiz_rescale_grade($attempt->sumgrades, $this->quiz, false, $attempt),
+                 $this->quiz->id, $this->context);
+ 
+         if ($this->is_downloading()) {
+diff --git a/public/mod/quiz/classes/output/attempt_summary_information.php b/public/mod/quiz/classes/output/attempt_summary_information.php
+index 7944d9f77c8..77c74ff5932 100644
+--- a/public/mod/quiz/classes/output/attempt_summary_information.php
++++ b/public/mod/quiz/classes/output/attempt_summary_information.php
+@@ -290,7 +290,7 @@ class attempt_summary_information implements renderable, named_templatable {
+         display_options $options,
+     ): ?float {
+         $quiz = $attemptobj->get_quiz();
+-        $grade = quiz_rescale_grade($attemptobj->get_sum_marks(), $quiz, false);
++        $grade = quiz_rescale_grade($attemptobj->get_sum_marks(), $quiz, false, $attemptobj->get_attempt());
+ 
+         if ($options->marks < question_display_options::MARK_AND_MAX) {
+             // User can't see grades.
+diff --git a/public/mod/quiz/classes/output/edit_renderer.php b/public/mod/quiz/classes/output/edit_renderer.php
+index 2066f7b4728..91b7b988e0d 100644
+--- a/public/mod/quiz/classes/output/edit_renderer.php
++++ b/public/mod/quiz/classes/output/edit_renderer.php
+@@ -623,6 +623,9 @@ class edit_renderer extends \plugin_renderer_base {
+             \core_question\local\bank\question_edit_contexts $contexts, array $pagevars) {
+ 
+         $actions = $this->edit_menu_actions($structure, $page, $pageurl, $pagevars);
++        $hook = new \mod_quiz\hook\edit_menu_actions($structure, $page, $pageurl, $pagevars, $actions);
++        \core\di::get(\core\hook\manager::class)->dispatch($hook);
++        $actions = $hook->get_actions();
+         if (empty($actions)) {
+             return '';
+         }
+@@ -884,6 +887,9 @@ class edit_renderer extends \plugin_renderer_base {
+         if ($structure->can_be_edited() && $structure->has_use_capability($slot)) {
+             $questionicons .= $this->question_remove_icon($structure, $slot, $pageurl);
+         }
++        $hook = new \mod_quiz\hook\edit_question_actions($structure, $slot, $pageurl);
++        \core\di::get(\core\hook\manager::class)->dispatch($hook);
++        $questionicons .= implode('', $hook->get_actions());
+         $questionicons .= $this->marked_out_of_field($structure, $slot);
+ 
+         return $questionicons;
+diff --git a/public/mod/quiz/classes/output/renderer.php b/public/mod/quiz/classes/output/renderer.php
+index f29f14edb84..870d6169693 100644
+--- a/public/mod/quiz/classes/output/renderer.php
++++ b/public/mod/quiz/classes/output/renderer.php
+@@ -1182,7 +1182,7 @@ class renderer extends plugin_renderer_base {
+             }
+ 
+             // Outside the if because we may be showing feedback but not grades.
+-            $attemptgrade = quiz_rescale_grade($attemptobj->get_sum_marks(), $quiz, false);
++            $attemptgrade = quiz_rescale_grade($attemptobj->get_sum_marks(), $quiz, false, $attemptobj->get_attempt());
+ 
+             if ($viewobj->gradecolumn) {
+                 if ($attemptoptions->marks >= question_display_options::MARK_AND_MAX &&
+diff --git a/public/mod/quiz/classes/privacy/provider.php b/public/mod/quiz/classes/privacy/provider.php
+index 4d6b1aafd2b..07fcadb5e2a 100644
+--- a/public/mod/quiz/classes/privacy/provider.php
++++ b/public/mod/quiz/classes/privacy/provider.php
+@@ -507,7 +507,7 @@ class provider implements
+         // Filtering the return values to be only those used to generate the data, this will have the benefit
+         // improving performance on all databases as we will no longer be returning a text field for each row.
+         $attemptfields = 'qa.id, qa.quiz, qa.userid, qa.attempt, qa.uniqueid, qa.preview, qa.state, qa.timestart, ' .
+-            'qa.timefinish, qa.timemodified, qa.timemodifiedoffline, qa.timecheckstate, qa.sumgrades, ' .
++            'qa.timefinish, qa.timemodified, qa.timemodifiedoffline, qa.timecheckstate, qa.sumgrades, qa.maxmark, ' .
+             'qa.gradednotificationsenttime';
+ 
+         $sql = "SELECT
+@@ -587,9 +587,12 @@ class provider implements
+                 if (!empty($attempt->gradednotificationsenttime)) {
+                     $data->gradednotificationsenttime = transform::datetime($attempt->gradednotificationsenttime);
+                 }
++                if (!is_null($attempt->maxmark)) {
++                    $data->maxmark = $attempt->maxmark;
++                }
+ 
+                 if ($options->marks == \question_display_options::MARK_AND_MAX) {
+-                    $grade = quiz_rescale_grade($attempt->sumgrades, $quiz, false);
++                    $grade = quiz_rescale_grade($attempt->sumgrades, $quiz, false, $attempt);
+                     $data->grade = (object) [
+                             'grade' => quiz_format_grade($quiz, $grade),
+                             'feedback' => quiz_feedback_for_grade($grade, $quiz, $context),
+diff --git a/public/mod/quiz/db/install.xml b/public/mod/quiz/db/install.xml
+index 6fb2b080671..06f40999ad9 100644
+--- a/public/mod/quiz/db/install.xml
++++ b/public/mod/quiz/db/install.xml
+@@ -160,6 +160,7 @@
+         <FIELD NAME="timemodifiedoffline" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="Last modified time via web services."/>
+         <FIELD NAME="timecheckstate" TYPE="int" LENGTH="10" NOTNULL="false" DEFAULT="0" SEQUENCE="false" COMMENT="Next time quiz cron should check attempt for state changes.  NULL means never check."/>
+         <FIELD NAME="sumgrades" TYPE="number" LENGTH="10" NOTNULL="false" SEQUENCE="false" DECIMALS="5" COMMENT="Total marks for this attempt."/>
++        <FIELD NAME="maxmark" TYPE="number" LENGTH="12" NOTNULL="false" SEQUENCE="false" DECIMALS="7" COMMENT="The effective maximum mark for this attempt."/>
+         <FIELD NAME="gradednotificationsenttime" TYPE="int" LENGTH="10" NOTNULL="false" SEQUENCE="false" COMMENT="The timestamp when the 'graded' notification was sent."/>
+       </FIELDS>
+       <KEYS>
+diff --git a/public/mod/quiz/db/upgrade.php b/public/mod/quiz/db/upgrade.php
+index 4361f308162..911177a978d 100644
+--- a/public/mod/quiz/db/upgrade.php
++++ b/public/mod/quiz/db/upgrade.php
+@@ -109,5 +109,14 @@ function xmldb_quiz_upgrade($oldversion) {
+     // Automatically generated Moodle v5.2.0 release upgrade line.
+     // Put any upgrade step following this.
+ 
++    if ($oldversion < 2026090200) {
++        $table = new xmldb_table('quiz_attempts');
++        $field = new xmldb_field('maxmark', XMLDB_TYPE_NUMBER, '12,7', null, null, null, null, 'sumgrades');
++        if (!$dbman->field_exists($table, $field)) {
++            $dbman->add_field($table, $field);
++        }
++        upgrade_mod_savepoint(true, 2026090200, 'quiz');
++    }
++
+     return true;
+ }
+diff --git a/public/mod/quiz/locallib.php b/public/mod/quiz/locallib.php
+index d2ec29a3417..b504781f7fc 100644
+--- a/public/mod/quiz/locallib.php
++++ b/public/mod/quiz/locallib.php
+@@ -169,16 +169,35 @@ function quiz_start_new_attempt($quizobj, $quba, $attempt, $attemptnumber, $time
+     // Partially load all the questions in this quiz.
+     $quizobj->preload_questions();
+ 
++    // Allow plugins to remove questions before they enter the question usage.
++    $questionfilterhook = new \mod_quiz\hook\before_attempt_questions_created(
++        $quizobj,
++        $attempt->userid,
++        $quizobj->get_questions(null, false),
++    );
++    \core\di::get(\core\hook\manager::class)->dispatch($questionfilterhook);
++    $filteredquestions = $questionfilterhook->get_questions();
++
+     // First load all the non-random questions.
+     $randomfound = false;
+     $slot = 0;
+     $questions = [];
+     $maxmark = [];
+     $page = [];
+-    foreach ($quizobj->get_questions(null, false) as $questiondata) {
++    $sections = $quizobj->get_sections();
++    $sectionquestions = array_fill(0, count($sections), []);
++    foreach ($filteredquestions as $questiondata) {
+         $slot += 1;
+         $maxmark[$slot] = $questiondata->maxmark;
+         $page[$slot] = $questiondata->page;
++        foreach ($sections as $sectionindex => $section) {
++            $nextsection = $sections[$sectionindex + 1] ?? null;
++            if ($questiondata->slot >= $section->firstslot &&
++                    (!$nextsection || $questiondata->slot < $nextsection->firstslot)) {
++                $sectionquestions[$sectionindex][] = $slot;
++                break;
++            }
++        }
+         if ($questiondata->status == \core_question\local\bank\question_version_status::QUESTION_STATUS_DRAFT) {
+             throw new moodle_exception('questiondraftonly', 'mod_quiz', '', $questiondata->name);
+         }
+@@ -202,7 +221,7 @@ function quiz_start_new_attempt($quizobj, $quba, $attempt, $attemptnumber, $time
+         }
+         $randomloader = new \core_question\local\bank\random_question_loader($qubaids, $usedquestionids);
+ 
+-        foreach ($quizobj->get_questions(null, false) as $questiondata) {
++        foreach ($filteredquestions as $questiondata) {
+             $slot += 1;
+             if (!$questiondata->random) {
+                 continue;
+@@ -260,22 +279,14 @@ function quiz_start_new_attempt($quizobj, $quba, $attempt, $attemptnumber, $time
+     $quba->start_all_questions($variantstrategy, question_attempt_step::TIMECREATED_ON_FIRST_RENDER, $attempt->userid);
+ 
+     // Work out the attempt layout.
+-    $sections = $quizobj->get_sections();
+-    foreach ($sections as $i => $section) {
+-        if (isset($sections[$i + 1])) {
+-            $sections[$i]->lastslot = $sections[$i + 1]->firstslot - 1;
+-        } else {
+-            $sections[$i]->lastslot = count($questions);
+-        }
+-    }
+-
+     $layout = [];
+-    foreach ($sections as $section) {
++    foreach ($sections as $sectionindex => $section) {
++        $sectionquestionslots = $sectionquestions[$sectionindex];
++        if (empty($sectionquestionslots)) {
++            continue;
++        }
+         if ($section->shufflequestions) {
+-            $questionsinthissection = [];
+-            for ($slot = $section->firstslot; $slot <= $section->lastslot; $slot += 1) {
+-                $questionsinthissection[] = $slot;
+-            }
++            $questionsinthissection = $sectionquestionslots;
+             shuffle($questionsinthissection);
+             $questionsonthispage = 0;
+             foreach ($questionsinthissection as $slot) {
+@@ -288,8 +299,8 @@ function quiz_start_new_attempt($quizobj, $quba, $attempt, $attemptnumber, $time
+             }
+ 
+         } else {
+-            $currentpage = $page[$section->firstslot];
+-            for ($slot = $section->firstslot; $slot <= $section->lastslot; $slot += 1) {
++            $currentpage = $page[$sectionquestionslots[0]];
++            foreach ($sectionquestionslots as $slot) {
+                 if ($currentpage !== null && $page[$slot] != $currentpage) {
+                     $layout[] = 0;
+                 }
+@@ -367,6 +378,9 @@ function quiz_attempt_save_started(
+ 
+     $attempt->timestart = $timenow ?? time();
+ 
++    $attemptsavehook = new \mod_quiz\hook\before_attempt_saved($quizobj, $quba, $attempt);
++    \core\di::get(\core\hook\manager::class)->dispatch($attemptsavehook);
++
+     $timeclose = $quizobj->get_access_manager($attempt->timestart)->get_end_time($attempt);
+     if ($timeclose === false || $attempt->preview) {
+         $attempt->timecheckstate = null;
+@@ -430,6 +444,9 @@ function quiz_attempt_save_started(
+  */
+ function quiz_attempt_save_not_started(question_usage_by_activity $quba, stdClass $attempt): stdClass {
+     global $DB;
++    $quizobj = \mod_quiz\quiz_settings::create($attempt->quiz);
++    $attemptsavehook = new \mod_quiz\hook\before_attempt_saved($quizobj, $quba, $attempt);
++    \core\di::get(\core\hook\manager::class)->dispatch($attemptsavehook);
+     // Save the attempt in the database.
+     question_engine::save_questions_usage_by_activity($quba);
+     $attempt->uniqueid = $quba->get_id();
+@@ -608,11 +625,14 @@ function quiz_repaginate_questions($quizid, $slotsperpage) {
+  * @return float|string the rescaled grade, or null/the lang string 'notyetgraded'
+  *      if the $grade is null.
+  */
+-function quiz_rescale_grade($rawgrade, $quiz, $format = true) {
++function quiz_rescale_grade($rawgrade, $quiz, $format = true, ?stdClass $attempt = null) {
++    $gradehook = new \mod_quiz\hook\before_attempt_grade_rescaled((float) $rawgrade, $quiz, $format, $attempt);
++    \core\di::get(\core\hook\manager::class)->dispatch($gradehook);
++    $maxmark = $gradehook->get_maxmark() ?? $quiz->sumgrades;
+     if (is_null($rawgrade)) {
+         $grade = null;
+-    } else if ($quiz->sumgrades >= grade_calculator::ALMOST_ZERO) {
+-        $grade = $rawgrade * $quiz->grade / $quiz->sumgrades;
++    } else if ($maxmark >= grade_calculator::ALMOST_ZERO) {
++        $grade = $rawgrade * $quiz->grade / $maxmark;
+     } else {
+         $grade = 0;
+     }
+diff --git a/public/mod/quiz/report/overview/overview_table.php b/public/mod/quiz/report/overview/overview_table.php
+index 89f1ad1405d..ea2e0e8876e 100644
+--- a/public/mod/quiz/report/overview/overview_table.php
++++ b/public/mod/quiz/report/overview/overview_table.php
+@@ -233,7 +233,7 @@ class quiz_overview_table extends attempts_report_table {
+             return '-';
+         }
+ 
+-        $grade = quiz_rescale_grade($attempt->sumgrades, $this->quiz);
++        $grade = quiz_rescale_grade($attempt->sumgrades, $this->quiz, true, $attempt);
+         if ($this->is_downloading()) {
+             return $grade;
+         }
+@@ -254,8 +254,8 @@ class quiz_overview_table extends attempts_report_table {
+                             [$question->slot]->fraction * $question->maxmark;
+                 }
+             }
+-            $newsumgrade = quiz_rescale_grade($newsumgrade, $this->quiz);
+-            $oldsumgrade = quiz_rescale_grade($oldsumgrade, $this->quiz);
++            $newsumgrade = quiz_rescale_grade($newsumgrade, $this->quiz, true, $attempt);
++            $oldsumgrade = quiz_rescale_grade($oldsumgrade, $this->quiz, true, $attempt);
+             $grade = html_writer::tag('del', $oldsumgrade) . '/' .
+                     html_writer::empty_tag('br') . $newsumgrade;
+         }
+@@ -295,7 +295,7 @@ class quiz_overview_table extends attempts_report_table {
+             }
+         } else {
+             $grade = quiz_rescale_grade(
+-                    $stepdata->fraction * $question->maxmark, $this->quiz, 'question');
++                    $stepdata->fraction * $question->maxmark, $this->quiz, 'question', $attempt);
+         }
+ 
+         if ($this->is_downloading()) {
+@@ -306,10 +306,10 @@ class quiz_overview_table extends attempts_report_table {
+             $gradefromdb = $grade;
+             $newgrade = quiz_rescale_grade(
+                     $this->regradedqs[$attempt->usageid][$slot]->newfraction * $question->maxmark,
+-                    $this->quiz, 'question');
++                    $this->quiz, 'question', $attempt);
+             $oldgrade = quiz_rescale_grade(
+                     $this->regradedqs[$attempt->usageid][$slot]->oldfraction * $question->maxmark,
+-                    $this->quiz, 'question');
++                    $this->quiz, 'question', $attempt);
+ 
+             $grade = html_writer::tag('del', $oldgrade) . '/' .
+                     html_writer::empty_tag('br') . $newgrade;
+diff --git a/public/mod/quiz/report/responses/last_responses_table.php b/public/mod/quiz/report/responses/last_responses_table.php
+index 5d2868ba1f4..a3893d00ceb 100644
+--- a/public/mod/quiz/report/responses/last_responses_table.php
++++ b/public/mod/quiz/report/responses/last_responses_table.php
+@@ -56,7 +56,7 @@ class quiz_last_responses_table extends attempts_report_table {
+             return '-';
+         }
+ 
+-        $grade = quiz_rescale_grade($attempt->sumgrades, $this->quiz);
++        $grade = quiz_rescale_grade($attempt->sumgrades, $this->quiz, true, $attempt);
+         if ($this->is_downloading()) {
+             return $grade;
+         }
+diff --git a/public/mod/quiz/version.php b/public/mod/quiz/version.php
+index 39223dec4dd..6fb72d2702e 100644
+--- a/public/mod/quiz/version.php
++++ b/public/mod/quiz/version.php
+@@ -24,6 +24,6 @@
+ 
+ defined('MOODLE_INTERNAL') || die();
+ 
+-$plugin->version = 2026042000;
++$plugin->version = 2026090200;
+ $plugin->requires = 2026041000;
+ $plugin->component = 'mod_quiz';
+diff --git a/public/mod/quiz/view.php b/public/mod/quiz/view.php
+index fdf38eb8856..418c57ed268 100644
+--- a/public/mod/quiz/view.php
++++ b/public/mod/quiz/view.php
+@@ -122,7 +122,7 @@ if (!$canpreview) {
+ } else if ($lastfinishedattempt) {
+     // Users who can preview the quiz don't get a proper grade, so work out a
+     // plausible value to display instead, so the page looks right.
+-    $mygrade = quiz_rescale_grade($lastfinishedattempt->sumgrades, $quiz, false);
++    $mygrade = quiz_rescale_grade($lastfinishedattempt->sumgrades, $quiz, false, $lastfinishedattempt);
+ } else {
+     $mygrade = null;
+ }
